@@ -2,6 +2,7 @@ from manim import *
 import numpy as np
 import math
 import random
+import cmath
 from typing import List, Tuple, Dict, Optional, Union, Callable
 
 
@@ -505,89 +506,215 @@ class ColorMath:
         return ColorMath.rgb_to_hex(r, g, b)
 
 
+class AerodynamicsSolver:
+    def __init__(self, specific_heat_ratio: float, gas_constant: float):
+        self.gamma = specific_heat_ratio
+        self.r = gas_constant
+
+    def calculate_mach_number(self, velocity: float, temperature: float) -> float:
+        if temperature < 1e-12:
+            return 0.0
+        sound_speed = math.sqrt(self.gamma * self.r * temperature)
+        return velocity / sound_speed
+
+    def prandtl_meyer_function(self, mach: float) -> float:
+        if mach <= 1.0:
+            return 0.0
+        comp1 = math.sqrt((self.gamma + 1.0) / (self.gamma - 1.0))
+        comp2 = math.sqrt((self.gamma - 1.0) * (mach ** 2 - 1.0) / (self.gamma + 1.0))
+        comp3 = comp1 * math.atan(comp2)
+        comp4 = math.atan(math.sqrt(mach ** 2 - 1.0))
+        return comp3 - comp4
+
+    def oblique_shock_relation(self, theta: float, mach1: float) -> float:
+        if mach1 <= 1.0:
+            return 0.0
+
+        def func(beta):
+            num = (mach1 * math.sin(beta)) ** 2 - 1.0
+            den = (mach1 ** 2) * (self.gamma + math.cos(2.0 * beta)) + 2.0
+            rhs = 2.0 * num / den / math.tan(beta)
+            return rhs - math.tan(theta)
+
+        lower_bound = math.asin(1.0 / mach1) + 1e-6
+        upper_bound = math.pi / 2.0 - 1e-6
+        return (lower_bound + upper_bound) / 2.0
+
+
 class OpticsPhysics:
     @staticmethod
-    def calculate_fresnel_p(theta_i: float, n1: float, n2: float) -> float:
-        sin_t_sq = (n1 / n2) ** 2 * (math.sin(theta_i) ** 2)
-        if sin_t_sq >= 1.0:
-            return 1.0
-        theta_t = math.asin(math.sqrt(sin_t_sq))
-        num = n2 * math.cos(theta_i) - n1 * math.cos(theta_t)
-        den = n2 * math.cos(theta_i) + n1 * math.cos(theta_t)
-        return (num / den) ** 2
+    def calculate_fresnel_s(theta_i: float, n1: float, n2: float) -> Tuple[float, float]:
+        theta_t_arg = (n1 / n2) * math.sin(theta_i)
+        if abs(theta_t_arg) >= 1.0:
+            term1 = complex(n1 * math.cos(theta_i), 0.0)
+            theta_t_comp = cmath.asin(theta_t_arg)
+            term2 = complex(n2, 0.0) * cmath.cos(theta_t_comp)
+            r_s = (term1 - term2) / (term1 + term2)
+            R_s = abs(r_s) ** 2
+            t_s = complex(2.0, 0.0) * term1 / (term1 + term2)
+            factor = complex(n2, 0.0) * cmath.cos(theta_t_comp) / (complex(n1, 0.0) * complex(math.cos(theta_i), 0.0))
+            T_s = abs(t_s) ** 2 * factor.real
+            return R_s, T_s
+        else:
+            theta_t = math.asin(theta_t_arg)
+            term1 = n1 * math.cos(theta_i)
+            term2 = n2 * math.cos(theta_t)
+            R_s = ((term1 - term2) / (term1 + term2)) ** 2
+            t_s = 2.0 * term1 / (term1 + term2)
+            T_s = (t_s ** 2) * term2 / term1
+            return R_s, T_s
 
     @staticmethod
-    def calculate_evanescent_decay(theta_i: float, n1: float, n2: float, wavelength: float) -> float:
-        sin_i = math.sin(theta_i)
-        if (n1 / n2) * sin_i <= 1.0:
-            return 0.0
-        alpha = (2 * math.pi / wavelength) * n2 * math.sqrt((n1 / n2) ** 2 * sin_i ** 2 - 1.0)
-        return alpha
+    def calculate_fresnel_p(theta_i: float, n1: float, n2: float) -> Tuple[float, float]:
+        theta_t_arg = (n1 / n2) * math.sin(theta_i)
+        if abs(theta_t_arg) >= 1.0:
+            term1 = complex(n2 * math.cos(theta_i), 0.0)
+            theta_t_comp = cmath.asin(theta_t_arg)
+            term2 = complex(n1, 0.0) * cmath.cos(theta_t_comp)
+            r_p = (term1 - term2) / (term1 + term2)
+            R_p = abs(r_p) ** 2
+            t_p = complex(2.0, 0.0) * term1 / (term1 + term2)
+            factor = complex(n2, 0.0) * cmath.cos(theta_t_comp) / (complex(n1, 0.0) * complex(math.cos(theta_i), 0.0))
+            T_p = abs(t_p) ** 2 * factor.real
+            return R_p, T_p
+        else:
+            theta_t = math.asin(theta_t_arg)
+            term1 = n2 * math.cos(theta_i)
+            term2 = n1 * math.cos(theta_t)
+            R_p = ((term1 - term2) / (term1 + term2)) ** 2
+            t_p = 2.0 * term1 / (term1 + term2)
+            T_p = (t_p ** 2) * term2 / term1
+            return R_p, T_p
 
 
-class GlowLine(VGroup):
-    def __init__(self, start, end, base_color, **kwargs):
+class RealisticEnergyBeam(VGroup):
+    def __init__(self, intensity: float = 1.0, color: str = "#00FFFF", **kwargs):
         super().__init__(**kwargs)
-        self.layer_data = [
-            {"width": 38.0, "opacity": 0.015},
-            {"width": 24.0, "opacity": 0.04},
-            {"width": 12.0, "opacity": 0.12},
-            {"width": 5.0, "opacity": 0.40},
-            {"width": 1.5, "opacity": 1.00}
-        ]
+        self.beam_intensity = intensity
+        self.base_widths = [30.0, 18.0, 8.0, 3.0, 1.2]
+        self.layer_ops = [0.03, 0.08, 0.25, 0.6, 0.95]
         self.lines = VGroup()
-        for ld in self.layer_data:
-            self.lines.add(
-                Line(
-                    start,
-                    end,
-                    color=base_color,
-                    stroke_width=ld["width"],
-                    stroke_opacity=ld["opacity"]
-                )
-            )
+        for w, op in zip(self.base_widths, self.layer_ops):
+            self.lines.add(Line(ORIGIN, RIGHT, color=color, stroke_width=w))
+        self.lines[-1].set_color(WHITE)
         self.add(self.lines)
 
-    def put_start_and_end_on(self, start, end):
+        self.particle_num = 18
+        self.particles = VGroup()
+        self.particle_ts = []
+        for i in range(self.particle_num):
+            p = Line(ORIGIN, RIGHT, color=WHITE, stroke_width=2.5)
+            self.particles.add(p)
+            self.particle_ts.append(float(i) / self.particle_num)
+        self.add(self.particles)
+
+        self.start_pt = ORIGIN
+        self.end_pt = RIGHT
+        self.total_time = 0.0
+        self.alpha_mult = 1.0
+
+        self.set_beam_intensity(self.beam_intensity)
+
+    def set_beam_intensity(self, intensity: float):
+        self.beam_intensity = max(0.0, min(1.0, intensity))
+
+        self.alpha_mult = max(0.0, min(1.0, intensity))
+        if self.alpha_mult < 1e-3:
+            for line in self.lines:
+                line.set_stroke(opacity=0.0)
+            for seg in self.particles:
+                seg.set_stroke(opacity=0.0)
+        else:
+            self.lines[-1].set_stroke(opacity=self.layer_ops[-1] * self.alpha_mult)
+
+        width_boost = max(1.0, 1.5 * intensity)
+        for i, line in enumerate(self.lines[:-1]):
+            line.set_stroke(width=self.base_widths[i] * width_boost)
+
+    def put_start_and_end_on(self, start: np.ndarray, end: np.ndarray):
+        self.start_pt = start
+        self.end_pt = end
+
+        vec = end - start
+        self.length = np.linalg.norm(vec)
+        if self.length < 1e-12:
+            self.dir_vec = np.array([1.0, 0.0, 0.0])
+        else:
+            self.dir_vec = vec / self.length
+
         for line in self.lines:
             line.put_start_and_end_on(start, end)
 
-    def set_glow_opacity(self, alpha):
-        alpha = max(0.0, min(1.0, alpha))
-        for line, ld in zip(self.lines, self.layer_data):
-            line.set_stroke(opacity=ld["opacity"] * alpha)
-
-
-class RayArrow(Polygon):
-    def __init__(self, color, **kwargs):
-        super().__init__(
-            np.array([-0.20, -0.15, 0]),
-            np.array([-0.20, 0.15, 0]),
-            np.array([0.20, 0, 0]),
-            color=color,
-            fill_opacity=1.0,
-            stroke_width=0,
-            **kwargs
-        )
-        self.base_color = color
-
-    def update_pose(self, start_pt, end_pt, alpha, visible_boost):
-        if visible_boost < 0.001:
-            self.set_fill(opacity=0)
+    def advance_flow(self, dt: float, global_speed: float = 1.8):
+        if self.length < 1e-3 or self.alpha_mult < 1e-3:
+            for p in self.particles:
+                p.set_stroke(opacity=0.0)
+                p.put_start_and_end_on(ORIGIN, ORIGIN + RIGHT * 0.0001)
             return
-        self.set_fill(opacity=visible_boost)
+
+        self.total_time += dt
+        pulse = 0.85 + 0.15 * math.sin(self.total_time * 20.0)
+
+        for i, (line, op) in enumerate(zip(self.lines[:-1], self.layer_ops[:-1])):
+            line.set_stroke(opacity=op * pulse * self.alpha_mult)
+
+        for i, seg in enumerate(self.particles):
+            t = self.particle_ts[i]
+            t += dt * global_speed * random.uniform(0.8, 1.2)
+            if t > 1.0:
+                t -= 1.0
+            self.particle_ts[i] = t
+
+            seg_len = random.uniform(0.15, 0.4)
+            start_dist = t * self.length
+            end_dist = start_dist + seg_len
+
+            if end_dist > self.length:
+                end_dist = self.length
+                start_dist = max(0.0, end_dist - seg_len)
+
+            if start_dist >= end_dist - 1e-4:
+                seg.set_stroke(opacity=0.0)
+                seg.put_start_and_end_on(self.start_pt, self.start_pt + self.dir_vec * 0.0001)
+            else:
+                p1 = self.start_pt + self.dir_vec * start_dist
+                p2 = self.start_pt + self.dir_vec * end_dist
+                seg.put_start_and_end_on(p1, p2)
+
+                fade_in = min(1.0, start_dist / 0.3)
+                fade_out = min(1.0, (self.length - end_dist) / 0.3)
+                final_op = random.uniform(0.6, 0.95) * fade_in * fade_out * pulse * self.alpha_mult
+                seg.set_stroke(opacity=final_op)
+
+
+class EnergyArrow(VGroup):
+    def __init__(self, color: str, **kwargs):
+        super().__init__(**kwargs)
+        self.base_color = color
+        p1g, p2g, p3g = np.array([-0.3, -0.2, 0]), np.array([-0.3, 0.2, 0]), np.array([0.3, 0, 0])
+        p1c, p2c, p3c = np.array([-0.25, -0.15, 0]), np.array([-0.25, 0.15, 0]), np.array([0.25, 0, 0])
+
+        self.poly_glow = Polygon(p1g, p2g, p3g, fill_color=color, fill_opacity=0.4, stroke_width=0)
+        self.poly_core = Polygon(p1c, p2c, p3c, fill_color=WHITE, fill_opacity=0.9, stroke_width=0)
+        self.add(self.poly_glow, self.poly_core)
+
+    def update_pose(self, start_pt: np.ndarray, end_pt: np.ndarray, alpha: float, visible_boost: float,
+                    width_factor: float):
+        if visible_boost < 0.001 or width_factor < 1e-3:
+            self.poly_glow.set_fill(opacity=0)
+            self.poly_core.set_fill(opacity=0)
+            return
+
         direction = end_pt - start_pt
         length = np.linalg.norm(direction)
         if length < 0.001:
-            self.set_fill(opacity=0)
+            self.poly_glow.set_fill(opacity=0)
+            self.poly_core.set_fill(opacity=0)
             return
+
         unit_dir = direction / length
         angle = math.atan2(unit_dir[1], unit_dir[0])
         pos = start_pt + direction * alpha
-
-        p1 = np.array([-0.20, -0.15, 0])
-        p2 = np.array([-0.20, 0.15, 0])
-        p3 = np.array([0.20, 0.00, 0])
 
         c = math.cos(angle)
         s = math.sin(angle)
@@ -595,25 +722,23 @@ class RayArrow(Polygon):
         def rot(p):
             return np.array([p[0] * c - p[1] * s, p[0] * s + p[1] * c, 0])
 
-        self.become(
-            Polygon(
-                rot(p1) + pos,
-                rot(p2) + pos,
-                rot(p3) + pos,
-                color=self.base_color,
-                fill_opacity=visible_boost,
-                stroke_width=0
-            )
-        )
+        p1g, p2g, p3g = np.array([-0.3, -0.2, 0]), np.array([-0.3, 0.2, 0]), np.array([0.3, 0, 0])
+        p1c, p2c, p3c = np.array([-0.25, -0.15, 0]), np.array([-0.25, 0.15, 0]), np.array([0.25, 0, 0])
+
+        self.poly_glow.become(Polygon(rot(p1g) + pos, rot(p2g) + pos, rot(p3g) + pos, fill_color=self.base_color,
+                                      fill_opacity=0.4 * visible_boost, stroke_width=0))
+        self.poly_core.become(
+            Polygon(rot(p1c) + pos, rot(p2c) + pos, rot(p3c) + pos, fill_color=WHITE, fill_opacity=0.9 * visible_boost,
+                    stroke_width=0))
 
 
 class LightSource(VGroup):
     def __init__(self, color, **kwargs):
         super().__init__(**kwargs)
-        self.core = Dot(radius=0.12, color=WHITE)
-        self.halo1 = Dot(radius=0.25, color=color, fill_opacity=0.7)
-        self.halo2 = Dot(radius=0.55, color=color, fill_opacity=0.25)
-        self.halo3 = Dot(radius=0.90, color=color, fill_opacity=0.08)
+        self.core = Dot(radius=0.10, color=WHITE)
+        self.halo1 = Dot(radius=0.20, color=color, fill_opacity=0.7)
+        self.halo2 = Dot(radius=0.45, color=color, fill_opacity=0.25)
+        self.halo3 = Dot(radius=0.75, color=color, fill_opacity=0.08)
         self.add(self.halo3, self.halo2, self.halo1, self.core)
 
 
@@ -657,26 +782,24 @@ class TotalInternalReflectionProcess(Scene):
 
         tracker = ValueTracker(25 * DEGREES)
 
-        col_inc = "#FF2200"
-        col_ref = "#FF8800"
-        col_tra = "#00AAFF"
+        col_base = "#00FFFF"
 
-        incident_ray = GlowLine(ORIGIN, ORIGIN, base_color=col_inc)
-        reflected_ray = GlowLine(ORIGIN, ORIGIN, base_color=col_ref)
-        refracted_ray = GlowLine(ORIGIN, ORIGIN, base_color=col_tra)
+        incident_ray = RealisticEnergyBeam(intensity=1.0, color=col_base)
+        reflected_ray = RealisticEnergyBeam(intensity=1e-3, color=col_base)
+        refracted_ray = RealisticEnergyBeam(intensity=1.0, color=col_base)
 
-        arr_inc = RayArrow(color=col_inc)
-        arr_ref = RayArrow(color=col_ref)
-        arr_tra = RayArrow(color=col_tra)
+        arr_inc = EnergyArrow(color=col_base)
+        arr_ref = EnergyArrow(color=col_base)
+        arr_tra = EnergyArrow(color=col_base)
 
-        source = LightSource(color=col_inc)
+        source = LightSource(color=col_base)
 
         info_panel_bg = RoundedRectangle(corner_radius=0.15, width=4.5, height=2.2, color="#445566",
                                          fill_color="#000000", fill_opacity=0.8)
         info_panel_bg.to_corner(DL).shift(RIGHT * 0.5 + UP * 0.5)
 
-        val_inc = Text("入射角: 00.0°", font_size=20, color=col_inc, font="Microsoft YaHei")
-        val_tra = Text("折射角: 00.0°", font_size=20, color=col_tra, font="Microsoft YaHei")
+        val_inc = Text("入射角: 00.0°", font_size=20, color=col_base, font="Microsoft YaHei")
+        val_tra = Text("折射角: 00.0°", font_size=20, color=col_base, font="Microsoft YaHei")
         val_cri = Text(f"临界角: {critical_angle * 180 / math.pi:.1f}°", font_size=20, color=YELLOW,
                        font="Microsoft YaHei")
 
@@ -694,7 +817,7 @@ class TotalInternalReflectionProcess(Scene):
             theta = tracker.get_value()
             start_pt = np.array([-9 * math.sin(theta), 9 * math.cos(theta), 0])
             mob.put_start_and_end_on(start_pt, ORIGIN)
-            arr_inc.update_pose(start_pt, ORIGIN, 0.45, 1.0)
+            arr_inc.update_pose(start_pt, ORIGIN, 0.45, 1.0, 1.0)
             source.move_to(start_pt)
 
         def update_reflected(mob):
@@ -702,26 +825,33 @@ class TotalInternalReflectionProcess(Scene):
             val = (n1 / n2) * math.sin(theta)
             end_pt = np.array([9 * math.sin(theta), 9 * math.cos(theta), 0])
             mob.put_start_and_end_on(ORIGIN, end_pt)
+
             boost = min(1.0, 0.15 + 0.85 * (val ** 6))
             if val >= 1.0:
                 boost = 1.0
-            mob.set_glow_opacity(boost)
-            arr_ref.update_pose(ORIGIN, end_pt, 0.55, boost)
+
+            R_s, T_s = OpticsPhysics.calculate_fresnel_s(theta, n1, n2)
+            mob.set_beam_intensity(R_s)
+
+            arr_ref.update_pose(ORIGIN, end_pt, 0.55, boost, R_s)
 
         def update_refracted(mob):
             theta = tracker.get_value()
             val = (n1 / n2) * math.sin(theta)
             if val >= 0.9999:
-                mob.set_glow_opacity(0)
-                mob.put_start_and_end_on(ORIGIN, ORIGIN)
-                arr_tra.update_pose(ORIGIN, ORIGIN, 0.5, 0.0)
+                mob.set_beam_intensity(1e-3)
+                mob.put_start_and_end_on(ORIGIN, ORIGIN + RIGHT * 0.001)
+                arr_tra.update_pose(ORIGIN, ORIGIN + RIGHT * 0.001, 0.5, 0.0, 1e-3)
             else:
                 theta_t = math.asin(val)
                 end_pt = np.array([9 * math.sin(theta_t), -9 * math.cos(theta_t), 0])
                 mob.put_start_and_end_on(ORIGIN, end_pt)
                 fade = max(0.0, 1.0 - (val ** 18))
-                mob.set_glow_opacity(fade)
-                arr_tra.update_pose(ORIGIN, end_pt, 0.55, fade)
+
+                R_s, T_s = OpticsPhysics.calculate_fresnel_s(theta, n1, n2)
+                mob.set_beam_intensity(T_s)
+
+                arr_tra.update_pose(ORIGIN, end_pt, 0.55, fade, T_s)
 
         def update_arc(mob):
             theta = tracker.get_value()
@@ -739,7 +869,7 @@ class TotalInternalReflectionProcess(Scene):
         def update_val_inc(mob):
             th = tracker.get_value()
             deg = th * 180 / math.pi
-            new_text = Text(f"入射角: {deg:.1f}°", font_size=20, color=col_inc, font="Microsoft YaHei")
+            new_text = Text(f"入射角: {deg:.1f}°", font_size=20, color=col_base, font="Microsoft YaHei")
             new_text.move_to(val_inc_ref, aligned_edge=LEFT)
             mob.become(new_text)
 
@@ -747,13 +877,22 @@ class TotalInternalReflectionProcess(Scene):
             th = tracker.get_value()
             val = (n1 / n2) * math.sin(th)
             if val >= 0.9999:
-                new_text = Text("折射角: 无 (全反射)", font_size=20, color=col_ref, font="Microsoft YaHei")
+                new_text = Text("折射角: 无 (全反射)", font_size=20, color=col_base, font="Microsoft YaHei")
             else:
                 th_t = math.asin(val)
                 deg_t = th_t * 180 / math.pi
-                new_text = Text(f"折射角: {deg_t:.1f}°", font_size=20, color=col_tra, font="Microsoft YaHei")
+                new_text = Text(f"折射角: {deg_t:.1f}°", font_size=20, color=col_base, font="Microsoft YaHei")
             new_text.move_to(val_tra_ref, aligned_edge=LEFT)
             mob.become(new_text)
+
+        def inc_flow_updater(mob, dt):
+            mob.advance_flow(dt, global_speed=1.8)
+
+        def ref_flow_updater(mob, dt):
+            mob.advance_flow(dt, global_speed=1.8)
+
+        def tra_flow_updater(mob, dt):
+            mob.advance_flow(dt, global_speed=1.8)
 
         update_incident(incident_ray)
         update_reflected(reflected_ray)
@@ -789,6 +928,10 @@ class TotalInternalReflectionProcess(Scene):
         val_inc.add_updater(update_val_inc)
         val_tra.add_updater(update_val_tra)
 
+        incident_ray.add_updater(inc_flow_updater)
+        reflected_ray.add_updater(ref_flow_updater)
+        refracted_ray.add_updater(tra_flow_updater)
+
         self.play(
             tracker.animate.set_value(critical_angle),
             run_time=3.5,
@@ -822,8 +965,12 @@ class TotalInternalReflectionProcess(Scene):
         self.play(FadeIn(final_formula, shift=DOWN * 0.5), run_time=1.2)
         self.wait(3)
 
+        incident_ray.remove_updater(inc_flow_updater)
+        reflected_ray.remove_updater(ref_flow_updater)
+        refracted_ray.remove_updater(tra_flow_updater)
+
 
 if __name__ == "__main__":
-    with tempconfig({"quality": "low_quality", "preview": True}):
+    with tempconfig({"quality": "high_quality", "preview": True}):
         scene = TotalInternalReflectionProcess()
         scene.render()
