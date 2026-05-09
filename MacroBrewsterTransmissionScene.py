@@ -580,20 +580,71 @@ class SolidStatePhysics:
         return ((hbar ** 2) / (2.0 * m_e)) * (3.0 * math.pi ** 2 * electron_density) ** (2.0 / 3.0)
 
 
-class StandardModelEngine:
-    def __init__(self, higgs_vev: float = 246.22):
-        self.v = higgs_vev
+class PlasmaPhysicsEngine:
+    def __init__(self, electron_density: float, temperature: float):
+        self.ne = electron_density
+        self.te = temperature
+        self.e = 1.602e-19
+        self.m_e = 9.109e-31
+        self.eps_0 = 8.854e-12
+        self.kb = 1.38e-23
 
-    def w_boson_mass(self, g: float) -> float:
-        return 0.5 * g * self.v
-
-    def z_boson_mass(self, g: float, g_prime: float) -> float:
-        return 0.5 * self.v * math.sqrt(g ** 2 + g_prime ** 2)
-
-    def weinberg_angle(self, g: float, g_prime: float) -> float:
-        if g < 1e-12:
+    def plasma_frequency(self) -> float:
+        if self.m_e < 1e-12 or self.eps_0 < 1e-12:
             return 0.0
-        return math.atan(g_prime / g)
+        omega_p_sq = (self.ne * self.e ** 2) / (self.m_e * self.eps_0)
+        return math.sqrt(omega_p_sq)
+
+    def debye_length(self) -> float:
+        if self.ne < 1e-12 or self.e < 1e-12:
+            return 0.0
+        return math.sqrt((self.eps_0 * self.kb * self.te) / (self.ne * self.e ** 2))
+
+    def thermal_velocity(self) -> float:
+        if self.m_e < 1e-12:
+            return 0.0
+        return math.sqrt((self.kb * self.te) / self.m_e)
+
+    def magnetic_pressure(self, b_field: float) -> float:
+        mu_0 = 1.256e-6
+        return (b_field ** 2) / (2.0 * mu_0)
+
+
+class QuantumComputingEngine:
+    def __init__(self, num_qubits: int):
+        self.num_qubits = num_qubits
+        self.state_vector = [ComplexMath(1.0, 0.0)] + [ComplexMath(0.0, 0.0)] * ((1 << num_qubits) - 1)
+
+    def apply_pauli_x(self, target_qubit: int):
+        mask = 1 << target_qubit
+        for i in range(1 << self.num_qubits):
+            if (i & mask) == 0:
+                partner = i | mask
+                temp = self.state_vector[i]
+                self.state_vector[i] = self.state_vector[partner]
+                self.state_vector[partner] = temp
+
+    def apply_pauli_z(self, target_qubit: int):
+        mask = 1 << target_qubit
+        for i in range(1 << self.num_qubits):
+            if (i & mask) != 0:
+                self.state_vector[i] = ComplexMath(-self.state_vector[i].real, -self.state_vector[i].imag)
+
+    def apply_hadamard(self, target_qubit: int):
+        mask = 1 << target_qubit
+        factor = 1.0 / math.sqrt(2.0)
+        for i in range(1 << self.num_qubits):
+            if (i & mask) == 0:
+                partner = i | mask
+                c0 = self.state_vector[i]
+                c1 = self.state_vector[partner]
+                self.state_vector[i] = ComplexMath((c0.real + c1.real) * factor, (c0.imag + c1.imag) * factor)
+                self.state_vector[partner] = ComplexMath((c0.real - c1.real) * factor, (c0.imag - c1.imag) * factor)
+
+    def get_probability(self, state_index: int) -> float:
+        if state_index < 0 or state_index >= len(self.state_vector):
+            return 0.0
+        return self.state_vector[state_index].magnitude() ** 2
 
 
 class ColorMath:
@@ -647,6 +698,38 @@ class OpticsPhysics:
             t_p = 2.0 * term1 / (term1 + term2)
             T_p = (t_p ** 2) * term2 / term1
             return R_p, T_p
+
+
+class RealisticGlassMedium(VGroup):
+    def __init__(self, width: float, height: float, base_color: str, **kwargs):
+        super().__init__(**kwargs)
+        self.base_rect = Rectangle(width=width, height=height, stroke_width=0, fill_color=base_color, fill_opacity=0.85)
+
+        self.top_edge = Rectangle(width=width, height=height * 0.08, stroke_width=0, fill_color=WHITE,
+                                  fill_opacity=0.15)
+        self.top_edge.next_to(self.base_rect.get_top(), DOWN, buff=0)
+
+        w = width / 2
+        h = height / 2
+
+        p1 = np.array([-w, h, 0])
+        p2 = np.array([-w + width * 0.25, h, 0])
+        p3 = np.array([-w, h - height * 0.7, 0])
+        glare1 = Polygon(p1, p2, p3, fill_color=WHITE, fill_opacity=0.1, stroke_width=0)
+
+        p4 = np.array([-w + width * 0.3, h, 0])
+        p5 = np.array([-w + width * 0.4, h, 0])
+        p6 = np.array([-w + width * 0.1, h - height, 0])
+        p7 = np.array([-w, h - height, 0])
+        glare2 = Polygon(p4, p5, p6, p7, fill_color=WHITE, fill_opacity=0.06, stroke_width=0)
+
+        p8 = np.array([w - width * 0.2, h, 0])
+        p9 = np.array([w - width * 0.15, h, 0])
+        p10 = np.array([w, h - height * 0.4, 0])
+        p11 = np.array([w, h - height * 0.25, 0])
+        glare3 = Polygon(p8, p9, p10, p11, fill_color=WHITE, fill_opacity=0.08, stroke_width=0)
+
+        self.add(self.base_rect, self.top_edge, glare1, glare2, glare3)
 
 
 class RealisticEnergyBeam(VGroup):
@@ -808,8 +891,8 @@ class MacroBrewsterTransmissionScene(Scene):
     def construct(self):
         tracker = ValueTracker(20 * DEGREES)
 
-        col_water = "#002244"
-        col_air = "#112233"
+        col_water = "#00254D"
+        col_air = "#050505"
         n_air = 1.00
         n_glass = 1.50
 
@@ -831,8 +914,8 @@ class MacroBrewsterTransmissionScene(Scene):
         air_rect.set_fill(color=col_air, opacity=0.8)
         air_rect.next_to(ORIGIN, UP, buff=0)
 
-        glass_rect = Rectangle(width=config.frame_width, height=config.frame_height / 2, stroke_width=0)
-        glass_rect.set_fill(color=col_water, opacity=0.8)
+        glass_rect = RealisticGlassMedium(width=config.frame_width, height=config.frame_height / 2,
+                                          base_color=col_water)
         glass_rect.next_to(ORIGIN, DOWN, buff=0)
 
         boundary = Line(LEFT * 8, RIGHT * 8, color="#88AACC", stroke_width=3)
