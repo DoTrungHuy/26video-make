@@ -1054,7 +1054,7 @@ class SplitBrewsterComparison(Scene):
 
             def update_arc(mob):
                 th = tracker.get_value()
-                new_arc = Arc(arc_center=center, radius=1.0, start_angle=math.pi / 2, angle=-th, color=WHITE,
+                new_arc = Arc(arc_center=center, radius=1.0, start_angle=math.pi / 2, angle=th, color=WHITE,
                               stroke_width=2.5)
                 new_arc.add_tip(tip_length=0.15, tip_width=0.15)
                 mob.become(new_arc)
@@ -1062,7 +1062,7 @@ class SplitBrewsterComparison(Scene):
             def update_theta_label(mob):
                 th = tracker.get_value()
                 r = 1.4
-                bisector = math.pi / 2 - th / 2
+                bisector = math.pi / 2 + th / 2
                 pos = center + np.array([r * math.cos(bisector), r * math.sin(bisector), 0])
                 mob.become(
                     MathTex(f"\\theta_1", font_size=28, color=WHITE).move_to(pos))
